@@ -6,6 +6,10 @@
 #include <mutex>
 #include <string>
 
+
+//MyFirstTry
+
+
 #include <afina/Storage.h>
 
 namespace Afina {
