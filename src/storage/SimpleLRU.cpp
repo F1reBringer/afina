@@ -5,7 +5,7 @@ namespace Afina
 namespace Backend 
 {
 
-//Try
+//MyTry
 
 void SimpleLRU::ChangePriority(SimpleLRU::lru_node& node)
 {
