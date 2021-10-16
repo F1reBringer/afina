@@ -22,6 +22,7 @@
 #include <afina/Storage.h>
 #include <afina/execute/Command.h>
 #include <afina/logging/Service.h>
+#include <afina/concurrency/Executor.h>
 
 
 #include "protocol/Parser.h"
@@ -245,6 +246,9 @@ void ServerImpl::MyWorker(int client_socket)
 void ServerImpl::OnRun()
 {
 
+    Afina::Concurrency::Executor executor("executor"); 
+    executor.Start(); //Starting pool of threads
+
     while (running.load())
     {
         _logger->debug("waiting for connection...");
@@ -274,30 +278,29 @@ void ServerImpl::OnRun()
 
         {
             struct timeval tv;
-            tv.tv_sec = 5; // TODO: make it configurable
+            //tv.tv_sec = 5; // TODO: make it configurable
+            tv.tv_sec = 100;
             tv.tv_usec = 0;
             setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
         }
         
         {
-            std::lock_guard<std::mutex> _lock(_mutex);
-            if (_sockets.size() < NumWorkers && running.load())
+            std::lock_guard<std::mutex> _lock(_mutex); // Mutex for protecting pool of threads
+            _sockets.insert(client_socket); // + client socket
+            if (!executor.Execute(&ServerImpl::MyWorker, this, client_socket)) // If cannot execute = close client!
             {
-                std::thread(&ServerImpl::MyWorker, this, client_socket).detach();
-                _sockets.insert(client_socket);
-            }
-             else 
-            {
+                std::lock_guard<std::mutex> _lock(_mutex);
                 close(client_socket);
+                _sockets.erase(client_socket);
             }
         }
 
     }
 
 
-    // Cleanup on exit...
+    executor.Stop(true); // End of working
 
-    close(_server_socket);
+    // Cleanup on exit...
 
     _logger->warn("Network stopped");
 }
