@@ -20,7 +20,6 @@
 
 #include <afina/Storage.h>
 #include <afina/logging/Service.h>
-
 #include "Connection.h"
 #include "Utils.h"
 
@@ -32,17 +31,24 @@ namespace STnonblock {
 ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl) {}
 
 // See Server.h
-ServerImpl::~ServerImpl() {}
+ServerImpl::~ServerImpl()
+{
+    Stop(); // Прекрати принимать новых клиентов
+    Join();// заблокируйся пока не завершаться все клиенты 
+    // По итогу - остановка сервера
+}
 
 // See Server.h
-void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) {
+void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers)
+{
     _logger = pLogging->select("network");
-    _logger->info("Start st_nonblocking network service");
+    _logger->info("Start st_nonblocking network service"); // Поехали 
 
     sigset_t sig_mask;
     sigemptyset(&sig_mask);
     sigaddset(&sig_mask, SIGPIPE);
-    if (pthread_sigmask(SIG_BLOCK, &sig_mask, NULL) != 0) {
+    if (pthread_sigmask(SIG_BLOCK, &sig_mask, NULL) != 0)
+    {
         throw std::runtime_error("Unable to mask SIGPIPE");
     }
 
@@ -54,29 +60,34 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
     server_addr.sin_addr.s_addr = INADDR_ANY; // Bind to any address
 
     _server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (_server_socket == -1) {
+    if (_server_socket == -1)
+    {
         throw std::runtime_error("Failed to open socket: " + std::string(strerror(errno)));
     }
 
     int opts = 1;
-    if (setsockopt(_server_socket, SOL_SOCKET, (SO_KEEPALIVE), &opts, sizeof(opts)) == -1) {
+    if (setsockopt(_server_socket, SOL_SOCKET, (SO_KEEPALIVE), &opts, sizeof(opts)) == -1)
+    {
         close(_server_socket);
         throw std::runtime_error("Socket setsockopt() failed: " + std::string(strerror(errno)));
     }
 
-    if (bind(_server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+    if (bind(_server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
+    {
         close(_server_socket);
         throw std::runtime_error("Socket bind() failed: " + std::string(strerror(errno)));
     }
 
     make_socket_non_blocking(_server_socket);
-    if (listen(_server_socket, 5) == -1) {
+    if (listen(_server_socket, 5) == -1)
+    {
         close(_server_socket);
         throw std::runtime_error("Socket listen() failed: " + std::string(strerror(errno)));
     }
 
     _event_fd = eventfd(0, EFD_NONBLOCK);
-    if (_event_fd == -1) {
+    if (_event_fd == -1)
+    {
         throw std::runtime_error("Failed to create epoll file descriptor: " + std::string(strerror(errno)));
     }
 
@@ -84,50 +95,71 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
 }
 
 // See Server.h
-void ServerImpl::Stop() {
+void ServerImpl::Stop()
+{
     _logger->warn("Stop network service");
 
     // Wakeup threads that are sleep on epoll_wait
-    if (eventfd_write(_event_fd, 1)) {
+    if (eventfd_write(_event_fd, 1))
+    {
         throw std::runtime_error("Failed to wakeup workers");
+    }
+
+    shutdown(_server_socket, SHUT_RDWR); // Серверу запрещаем чтение и запись
+
+    for (auto pc : ClientConnections)
+    {
+    	shutdown(pc->_socket, SHUT_RDWR); // Каждому клиенту - запрет чтения и записи
     }
 }
 
 // See Server.h
-void ServerImpl::Join() {
+void ServerImpl::Join()
+{
     // Wait for work to be complete
-    _work_thread.join();
+    if (_work_thread.joinable())// Можем остановить?
+    { 
+        _work_thread.join(); // Блокируйся
+    }
 }
 
 // See ServerImpl.h
-void ServerImpl::OnRun() {
+void ServerImpl::OnRun() // Поехала обработка
+{
     _logger->info("Start acceptor");
-    int epoll_descr = epoll_create1(0);
-    if (epoll_descr == -1) {
+    int epoll_descr = epoll_create1(0); // Отдали мешочек сокетов ядру
+    if (epoll_descr == -1) // Не получилось отдать - до свидания
+    {
         throw std::runtime_error("Failed to create epoll file descriptor: " + std::string(strerror(errno)));
     }
 
-    struct epoll_event event;
-    event.events = EPOLLIN;
-    event.data.fd = _server_socket;
-    if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, _server_socket, &event)) {
+    struct epoll_event event; //структурка, нужная дабы добавить сокет в мешочек сокетов
+    event.events = EPOLLIN; // На чтение
+    event.data.fd = _server_socket; 
+    // Туть: системный вызов, позволяющий управлять содержимым сокета, флажок что мы хотим добавить сокет, добавляем серверный
+    // сокет и то, что прописано в евент (на чтение)
+    if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, _server_socket, &event)) 
+    {
         throw std::runtime_error("Failed to add file descriptor to epoll");
     }
 
-    struct epoll_event event2;
-    event2.events = EPOLLIN;
+    struct epoll_event event2; 
+    event2.events = EPOLLIN; // снова на чтение
     event2.data.fd = _event_fd;
-    if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, _event_fd, &event2)) {
+    if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, _event_fd, &event2)) // аналогичненько
+    {
         throw std::runtime_error("Failed to add file descriptor to epoll");
     }
 
-    bool run = true;
+    bool run = true; //запустились
     std::array<struct epoll_event, 64> mod_list;
-    while (run) {
+    while (run) //бесконечный цикл
+    {
         int nmod = epoll_wait(epoll_descr, &mod_list[0], mod_list.size(), -1);
         _logger->debug("Acceptor wokeup: {} events", nmod);
 
-        for (int i = 0; i < nmod; i++) {
+        for (int i = 0; i < nmod; i++)
+        {
             struct epoll_event &current_event = mod_list[i];
             if (current_event.data.fd == _event_fd) {
                 _logger->debug("Break acceptor due to stop signal");
@@ -139,37 +171,59 @@ void ServerImpl::OnRun() {
             }
 
             // That is some connection!
-            Connection *pc = static_cast<Connection *>(current_event.data.ptr);
+            Connection *pc = static_cast<Connection *>(current_event.data.ptr); // Поймали соединение
+            ClientConnections.insert(pc); // Впихнули в сет коннекшнов
 
             auto old_mask = pc->_event.events;
-            if ((current_event.events & EPOLLERR) || (current_event.events & EPOLLHUP)) {
+            if ((current_event.events & EPOLLERR) || (current_event.events & EPOLLHUP))
+             { // Если есть событие, но ошибка или обрыв соединения - усё, ошибка
                 pc->OnError();
-            } else if (current_event.events & EPOLLRDHUP) {
-                pc->OnClose();
-            } else {
-                // Depends on what connection wants...
-                if (current_event.events & EPOLLIN) {
-                    pc->DoRead();
+            } 
+            else if (current_event.events & EPOLLRDHUP) // На случай если отключился клиент на запись
+            {
+                _logger->debug("response-only"); // усё, только отвечаем на то, что он нам накидал
+                if (current_event.events & EPOLLOUT) // Вкинул уже что то на запись?
+                {
+                    pc->DoWrite(); // Пишем
                 }
-                if (current_event.events & EPOLLOUT) {
-                    pc->DoWrite();
+                else
+                {
+                    pc->OnClose(); // Ничего нет? Закрылись
+                }
+            }
+            else
+            {
+                // Depends on what connection wants...
+                if (current_event.events & EPOLLIN) // Хотел прочитать?
+                {
+                    pc->DoRead(); // Читаем
+                }
+                if (current_event.events & EPOLLOUT) //Хотел записать?ы
+                {
+                    pc->DoWrite(); //Пишем
                 }
             }
 
             // Does it alive?
-            if (!pc->isAlive()) {
-                if (epoll_ctl(epoll_descr, EPOLL_CTL_DEL, pc->_socket, &pc->_event)) {
+            if (!pc->isAlive()) // Хей ты там живой? Нет? Тогда отключаем это коннекшн 
+            {
+                if (epoll_ctl(epoll_descr, EPOLL_CTL_DEL, pc->_socket, &pc->_event))
+                {
                     _logger->error("Failed to delete connection from epoll");
                 }
 
+                ClientConnections.erase(pc); // Удалили коннекшн
                 close(pc->_socket);
                 pc->OnClose();
 
                 delete pc;
-            } else if (pc->_event.events != old_mask) {
+            } 
+            else if (pc->_event.events != old_mask)
+            {
                 if (epoll_ctl(epoll_descr, EPOLL_CTL_MOD, pc->_socket, &pc->_event)) {
                     _logger->error("Failed to change connection event mask");
 
+                    ClientConnections.erase(pc); // Удалили коннекшн
                     close(pc->_socket);
                     pc->OnClose();
 
@@ -178,10 +232,23 @@ void ServerImpl::OnRun() {
             }
         }
     }
-    _logger->warn("Acceptor stopped");
+    // Вышли из бесконечного цикла?
+    close(_server_socket); //Закрыли серверный сокет
+
+    for (auto pc : ClientConnections) // Закрыли все клиентские сокеты
+    {
+    	close(pc->_socket);
+        pc->OnClose();
+
+        delete pc;
+    }
+
+    ClientConnections.clear(); // Очистили множество клиентских сокетов
+
+    _logger->warn("Acceptor stopped"); // До свидания
 }
 
-void ServerImpl::OnNewConnection(int epoll_descr) {
+void ServerImpl::OnNewConnection(int epoll_descr){
     for (;;) {
         struct sockaddr in_addr;
         socklen_t in_len;
@@ -207,7 +274,7 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
         }
 
         // Register the new FD to be monitored by epoll.
-        Connection *pc = new(std::nothrow) Connection(infd);
+        Connection *pc = new(std::nothrow) Connection(infd, pStorage, _logger);
         if (pc == nullptr) {
             throw std::runtime_error("Failed to allocate connection");
         }
