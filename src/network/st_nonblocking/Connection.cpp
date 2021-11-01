@@ -42,7 +42,7 @@ void Connection::DoRead()
     // Всё как во второй домашке
     try {
         int readed_bytes = -1;
-        while ((readed_bytes = read(_socket, _client_buffer + _read_bytes, sizeof(_client_buffer) - _read_bytes)) > 0)
+        if((readed_bytes = read(_socket, _client_buffer + _read_bytes, sizeof(_client_buffer) - _read_bytes)) > 0)
         {
             _read_bytes += readed_bytes;
             _logger->debug("Got {} bytes from socket", readed_bytes);
@@ -125,10 +125,11 @@ void Connection::DoRead()
             } // while (_read_bytes)
         }
 
-        if (_read_bytes == 0) // Прочитали всё?
+        if (_read_bytes == 0)
         {
-            _logger->debug("Connection closed"); //Закрылись
-        } else
+            _logger->debug("Connection closed");
+        } 
+        else if(errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK)
         {
             throw std::runtime_error(std::string(strerror(errno)));
         }
@@ -137,7 +138,7 @@ void Connection::DoRead()
     {
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
         
-        _output.push_back("ERROR\r\n"); // Сори,ошибка
+        _output.push_back("ERROR\r\n");
         if (!(_event.events & EPOLLOUT))
         {
             _event.events |= EPOLLOUT;
@@ -149,9 +150,10 @@ void Connection::DoRead()
 // See Connection.h
 void Connection::DoWrite()
 {
+   try
+   {
     _logger->debug("DoWrite {} socket", _socket); // Запись
-
-    struct iovec data[_output.size()];
+    struct iovec data[_output.size()] = {};
     size_t i = 0;
     for (i = 0; i < _output.size(); ++i)
     {
@@ -163,11 +165,12 @@ void Connection::DoWrite()
     data[0].iov_len -= _write_bytes;
 
     int written_bytes = writev(_socket, data, i);
-
-    if (written_bytes <= 0)
+	
+    
+    if( written_bytes < 0 && errno != EINTR && errno!= EAGAIN)
     {
-        _is_alive = false;
-        throw std::runtime_error("Failed to send response");
+    	
+    	throw std::runtime_error(std::string(strerror(errno)));
     }
 
     i = 0;
@@ -192,10 +195,18 @@ void Connection::DoWrite()
         _event.events &= ~EPOLLOUT;
     }
 
-    if (_output.size() <= _max_output_size)
+    if (_output.size() <= 0.9 * _max_output_size)
     {
         _event.events |= EPOLLIN;
     }
+    
+    }
+    catch (std::runtime_error &ex)
+    {
+    	_logger->error("Failed to write connection on descriptor {}: {}", _socket, ex.what());
+    	_is_alive = false;
+    }
+    
 }
 
 } // namespace STnonblock

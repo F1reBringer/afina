@@ -46,7 +46,7 @@ private:
     std::shared_ptr<Afina::Storage> _pStorage;
     std::shared_ptr<spdlog::logger> _logger; 
 
-    char _client_buffer[4096]; //Клиентский буфер на 4096
+    char _client_buffer[4096] = ""; //Клиентский буфер на 4096
     std::size_t _read_bytes = 0;//Для чтения байтиков
     std::size_t _write_bytes = 0; // Для записи байтиков
     // Как во второй домашке

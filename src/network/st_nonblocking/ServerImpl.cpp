@@ -237,8 +237,8 @@ void ServerImpl::OnRun() // Поехала обработка
 
     for (auto pc : ClientConnections) // Закрыли все клиентские сокеты
     {
-    	close(pc->_socket);
         pc->OnClose();
+        close(pc->_socket);
 
         delete pc;
     }
