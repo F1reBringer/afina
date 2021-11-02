@@ -4,9 +4,15 @@
 #include <thread>
 #include <vector>
 
+#include <set>
+#include <mutex>
+
+
+#include "Connection.h"
 #include <afina/network/Server.h>
 
-namespace spdlog {
+namespace spdlog
+{
 class logger;
 }
 
@@ -21,7 +27,8 @@ class Worker;
  * # Network resource manager implementation
  * Epoll based server
  */
-class ServerImpl : public Server {
+class ServerImpl : public Server
+{
 public:
     ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl);
     ~ServerImpl();
@@ -40,6 +47,8 @@ protected:
     void OnNewConnection();
 
 private:
+    friend class Worker;
+
     // logger to use
     std::shared_ptr<spdlog::logger> _logger;
 
@@ -63,6 +72,10 @@ private:
 
     // threads serving read/write requests
     std::vector<Worker> _workers;
+    
+    std::set<Connection *> _connection_storage;
+    std::mutex _connection_storage_blocking;
+    
 };
 
 } // namespace MTnonblock

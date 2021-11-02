@@ -7,7 +7,7 @@ namespace MTnonblock {
 
 void make_socket_non_blocking(int sfd);
 
-} // namespace MTnonblock
+} // namespace MTnonblock 
 } // namespace Network
 } // namespace Afina
 
