@@ -175,7 +175,7 @@ void Worker::OnRun()
                 close(pconn->_socket);
                 std::lock_guard<std::mutex> l(_server->_connection_storage_blocking);
                 auto position = std::find(_server->_connection_storage.begin(), _server->_connection_storage.end(), pconn);
-                _server->_connection_storage.erase(position);
+                _server->_connection_storage.erase(pconn);
                 
                 delete pconn;
             }

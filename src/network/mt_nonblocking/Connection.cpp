@@ -47,7 +47,7 @@ void Connection::DoRead()
     
     
         int readed_bytes = -1;
-        if((readed_bytes = read(_socket, _client_buffer + _read_bytes, sizeof(_client_buffer) - _read_bytes)) > 0)
+        while((readed_bytes = read(_socket, _client_buffer + _read_bytes, sizeof(_client_buffer) - _read_bytes)) > 0)
         {
             _read_bytes += readed_bytes;
             _logger->debug("Got {} bytes from socket", readed_bytes);
