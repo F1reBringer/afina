@@ -2,9 +2,12 @@
 #define AFINA_NETWORK_ST_NONBLOCKING_SERVER_H
 
 #include <thread>
-#include <vector>
+#include <set>
+#include <algorithm>
 
 #include <afina/network/Server.h>
+
+#include "Connection.h"
 
 namespace spdlog {
 class logger;
@@ -33,11 +36,13 @@ public:
     void Stop() override;
 
     // See Server.h
-    void Join() override;
+    void Join() override; 
+    // Напоминаю сам себе,на случай если я одарённый и забуду: Join для сервера - 
+    // блокирует вызывающий поток до тех пор, пока не завершатся существующие клиенты
 
 protected:
-    void OnRun();
-    void OnNewConnection(int);
+    void OnRun(); // Запуск сервера
+    void OnNewConnection(int); // Взято новое соединение
 
 private:
     // logger to use
@@ -49,13 +54,15 @@ private:
     uint16_t listen_port;
 
     // Socket to accept new connection on, shared between acceptors
-    int _server_socket;
+    int _server_socket; 
 
     // Curstom event "device" used to wakeup workers
-    int _event_fd;
+    int _event_fd; //
 
     // IO thread
-    std::thread _work_thread;
+    std::thread _work_thread; // Один поток для асинхронного IO
+    
+    std::set<Connection *> ClientConnections; // Сетик с коннекшнами клиентов
 };
 
 } // namespace STnonblock
