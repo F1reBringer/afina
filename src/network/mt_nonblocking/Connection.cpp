@@ -129,7 +129,6 @@ void Connection::DoRead()
         {
             _logger->debug("Connection closed");
             _data_available.store(true, std::memory_order_relaxed);
-            std::atomic_thread_fence(std::memory_order_release);
         } 
         else if(errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK)
         {
@@ -150,6 +149,7 @@ void Connection::DoRead()
         _data_available.store(true, std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_release);
     }
+    std::atomic_thread_fence(std::memory_order_release);
 }
 
 // See Connection.h
@@ -222,6 +222,9 @@ void Connection::DoWrite()
     	_is_alive.store(false, std::memory_order_release);
     }
     
+    
+    
+  std::atomic_thread_fence(std::memory_order_release);
 }
 
 } // namespace MTnonblock
