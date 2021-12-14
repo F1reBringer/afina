@@ -39,7 +39,7 @@ public:
              std::size_t high_watermark = 10, //Max Count of threads in pool
              std::size_t max_queue_size = 50, // Max size of Queue
              std::size_t idle_time = 2048) // Maximum task waiting time
-             : _name(name)
+             : _name(std::move(name))
              , _low_watermark(low_watermark) 
              , _high_watermark(high_watermark) //Constructor
              , _max_queue_size(max_queue_size)
@@ -77,7 +77,7 @@ public:
 
         // Enqueue new task
         tasks.push_back(exec);
-        if (tasks.size() > NumOfFreeThreads && CountOfThreads < _high_watermark) // creating of new thread
+        if (NumOfFreeThreads == 0) // creating of new thread
         {
             CountOfThreads++;
             NumOfFreeThreads++;
@@ -100,12 +100,12 @@ public:
         {
             while (executor->tasks.empty() && executor->state == State::kRun) // When we have no tasks and Executor already running
             {
-                if (executor->Empty_Condition.wait_for(_lock, std::chrono::milliseconds(executor->_idle_time)) == std::cv_status::timeout // timeout idle_time
+            auto Begin = std::chrono::steady_clock::now();
+                if (executor->Empty_Condition.wait_until(_lock, Begin + std::chrono::milliseconds(executor->_idle_time))== std::cv_status::timeout // timeout idle_time
                 && executor->CountOfThreads > executor->_low_watermark) // NumOfThreads must be bigger than low_watermark
                 {
                     executor->CountOfThreads--; //delete one of threads
                     executor->NumOfFreeThreads--; // delete on of threads
-                    executor->Stop_condition.notify_all();
                     return;
                 }
             }
@@ -115,7 +115,16 @@ public:
                 auto task = executor->tasks.front(); 
                 executor->tasks.pop_front(); 
                 _lock.unlock();
-                task();
+                
+                
+            try
+            {
+            	task();
+            } 
+            catch(...)
+            {
+                throw std::runtime_error("Error, cannot do task\n");
+            }
                 _lock.lock();
                 executor->NumOfFreeThreads++; // this thread is free now
             }
