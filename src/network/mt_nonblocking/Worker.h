@@ -4,30 +4,41 @@
 #include <atomic>
 #include <memory>
 #include <thread>
+#include <algorithm>
 
-namespace spdlog {
-class logger;
+#include "ServerImpl.h"
+
+
+
+namespace spdlog
+{
+	class logger;
 }
 
-namespace Afina {
+namespace Afina 
+{
 
 // Forward declaration, see afina/Storage.h
 class Storage;
-namespace Logging {
-class Service;
+namespace Logging
+{
+	class Service;
 }
 
-namespace Network {
-namespace MTnonblock {
+namespace Network 
+{
+namespace MTnonblock 
+{
 
 /**
  * # Thread running epoll
  * On Start spaws background thread that is doing epoll on the given server
  * socket and process incoming connections and its data
  */
-class Worker {
+class Worker 
+{
 public:
-    Worker(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Afina::Logging::Service> pl);
+    Worker(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Afina::Logging::Service> pl, ServerImpl *server);
     ~Worker();
 
     Worker(Worker &&);
@@ -81,6 +92,8 @@ private:
 
     // EPOLL descriptor using for events processing
     int _epoll_fd;
+    
+    ServerImpl *_server;
 };
 
 } // namespace MTnonblock
