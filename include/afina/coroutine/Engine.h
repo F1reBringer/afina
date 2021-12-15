@@ -16,7 +16,8 @@ namespace Coroutine {
  * # Entry point of coroutine library
  * Allows to run coroutine and schedule its execution. Not threadsafe
  */
-class Engine final {
+class Engine final
+{
 public:
     using unblocker_func = std::function<void(Engine &)>;
 
@@ -26,7 +27,8 @@ private:
      * should be allocated on heap
      */
     struct context;
-    typedef struct context {
+    typedef struct context
+    {
         // coroutine stack start address
         char *Low = nullptr;
 
@@ -42,6 +44,8 @@ private:
         // To include routine in the different lists, such as "alive", "blocked", e.t.c
         struct context *prev = nullptr;
         struct context *next = nullptr;
+   	//blocked indicator     
+        bool is_blocked = false;
     } context;
 
     /**
@@ -73,6 +77,9 @@ private:
      * Call when all coroutines are blocked
      */
     unblocker_func _unblocker;
+    
+    void DeleteElement(context *&Head, context *&Element);
+    void AddingToTheHead(context *&Head, context *&New_Head);
 
 protected:
     /**
@@ -89,9 +96,17 @@ protected:
 
 public:
     Engine(unblocker_func unblocker = null_unblocker)
-        : StackBottom(0), cur_routine(nullptr), alive(nullptr), _unblocker(unblocker) {}
+        : StackBottom(0)
+        , cur_routine(nullptr)
+        , alive(nullptr)
+        , blocked(nullptr)
+        , idle_ctx(nullptr)
+        , _unblocker(std::move(unblocker)) {}
+        
     Engine(Engine &&) = delete;
     Engine(const Engine &) = delete;
+    
+     ~Engine();
 
     /**
      * Gives up current routine execution and let engine to schedule other one. It is not defined when
@@ -111,7 +126,12 @@ public:
      * if passed routine is the current one method does nothing
      */
     void sched(void *routine);
-
+    
+    
+    void SwitchCouroutine(context *ctx);
+    
+    
+    
     /**
      * Blocks current routine so that is can't be scheduled anymore
      * If it was a currently running corountine, then do yield to select new one to be run instead.
@@ -135,7 +155,8 @@ public:
      * @param pointer to the main coroutine
      * @param arguments to be passed to the main coroutine
      */
-    template <typename... Ta> void start(void (*main)(Ta...), Ta &&... args) {
+    template <typename... Ta> void start(void (*main)(Ta...), Ta &&... args)
+    {
         // To acquire stack begin, create variable on stack and remember its address
         char StackStartsHere;
         this->StackBottom = &StackStartsHere;
@@ -144,40 +165,60 @@ public:
         void *pc = run(main, std::forward<Ta>(args)...);
 
         idle_ctx = new context();
-        if (setjmp(idle_ctx->Environment) > 0) {
-            if (alive == nullptr) {
+        idle_ctx->Low = idle_ctx->Hight = StackBottom;
+        
+        
+        if (setjmp(idle_ctx->Environment) > 0)
+        {
+            if (alive == nullptr)
+            {
                 _unblocker(*this);
             }
 
             // Here: correct finish of the coroutine section
+            cur_routine = idle_ctx;
             yield();
-        } else if (pc != nullptr) {
+        }
+        else if (pc != nullptr)
+        {
             Store(*idle_ctx);
+            cur_routine = idle_ctx;
             sched(pc);
         }
 
         // Shutdown runtime
+        delete[] std::get<0>(idle_ctx->Stack);
         delete idle_ctx;
-        this->StackBottom = 0;
+        this->StackBottom = nullptr;
     }
 
     /**
      * Register new coroutine. It won't receive control until scheduled explicitely or implicitly. In case of some
      * errors function returns -1
      */
-    template <typename... Ta> void *run(void (*func)(Ta...), Ta &&... args) {
-        if (this->StackBottom == 0) {
+    template <typename... Ta> void *run(void (*func)(Ta...), Ta &&... args)
+    {
+        char var;
+        return run_impl(&var, func, std::forward<Ta>(args)...);
+    }
+
+    template <typename... Ta> void *run_impl(char *var, void (*func)(Ta...), Ta &&... args)
+    {
+        if (this->StackBottom == nullptr)
+        {
             // Engine wasn't initialized yet
             return nullptr;
         }
 
         // New coroutine context that carries around all information enough to call function
         context *pc = new context();
+        pc->Low = pc->Hight = var;
 
         // Store current state right here, i.e just before enter new coroutine, later, once it gets scheduled
         // execution starts here. Note that we have to acquire stack of the current function call to ensure
         // that function parameters will be passed along
-        if (setjmp(pc->Environment) > 0) {
+        if (setjmp(pc->Environment) > 0)
+        {
             // Created routine got control in order to start execution. Note that all variables, such as
             // context pointer, arguments and a pointer to the function comes from restored stack
 
@@ -188,22 +229,25 @@ public:
             // to pass control after that. We never want to go backward by stack as that would mean to go backward in
             // time. Function run() has already return once (when setjmp returns 0), so return second return from run
             // would looks a bit awkward
-            if (pc->prev != nullptr) {
+            if (pc->prev != nullptr)
+            {
                 pc->prev->next = pc->next;
             }
 
-            if (pc->next != nullptr) {
+            if (pc->next != nullptr)
+            {
                 pc->next->prev = pc->prev;
             }
 
-            if (alive == cur_routine) {
+            if (alive == cur_routine)
+            {
                 alive = alive->next;
             }
 
             // current coroutine finished, and the pointer is not relevant now
             cur_routine = nullptr;
             pc->prev = pc->next = nullptr;
-            delete std::get<0>(pc->Stack);
+            delete[] std::get<0>(pc->Stack);
             delete pc;
 
             // We cannot return here, as this function "returned" once already, so here we must select some other
@@ -220,7 +264,8 @@ public:
         // Add routine as alive double-linked list
         pc->next = alive;
         alive = pc;
-        if (pc->next != nullptr) {
+        if (pc->next != nullptr)
+        {
             pc->next->prev = pc;
         }
 

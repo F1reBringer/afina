@@ -21,24 +21,39 @@ namespace Network {
 namespace MTnonblock {
 
 // See Worker.h
-Worker::Worker(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Afina::Logging::Service> pl)
-    : _pStorage(ps), _pLogging(pl), isRunning(false), _epoll_fd(-1) {
-    // TODO: implementation here
+Worker::Worker(std::shared_ptr<Afina::Storage> ps,
+               std::shared_ptr<Afina::Logging::Service> pl,
+               ServerImpl *server)
+    : _pStorage(ps),
+    _pLogging(pl),
+    _server(server),
+    isRunning(false),
+    _epoll_fd(-1)
+     {}
+
+
+
+
+// See Worker.h
+Worker::~Worker()
+{
+    Stop();
+    Join();
 }
 
 // See Worker.h
-Worker::~Worker() {
-    // TODO: implementation here
+Worker::Worker(Worker &&other) 
+{
+	*this = std::move(other);
 }
 
 // See Worker.h
-Worker::Worker(Worker &&other) { *this = std::move(other); }
-
-// See Worker.h
-Worker &Worker::operator=(Worker &&other) {
+Worker &Worker::operator=(Worker &&other)
+{
     _pStorage = std::move(other._pStorage);
     _pLogging = std::move(other._pLogging);
     _logger = std::move(other._logger);
+    _server = std::move(other._server);
     _thread = std::move(other._thread);
     _epoll_fd = other._epoll_fd;
 
@@ -47,8 +62,10 @@ Worker &Worker::operator=(Worker &&other) {
 }
 
 // See Worker.h
-void Worker::Start(int epoll_fd) {
-    if (isRunning.exchange(true) == false) {
+void Worker::Start(int epoll_fd)
+{
+    if (isRunning.exchange(true) == false)
+    {
         assert(_epoll_fd == -1);
         _epoll_fd = epoll_fd;
         _logger = _pLogging->select("network.worker");
@@ -57,16 +74,18 @@ void Worker::Start(int epoll_fd) {
 }
 
 // See Worker.h
-void Worker::Stop() { isRunning = false; }
+void Worker::Stop(){ isRunning = false; }
 
 // See Worker.h
-void Worker::Join() {
+void Worker::Join() 
+{
     assert(_thread.joinable());
     _thread.join();
 }
 
 // See Worker.h
-void Worker::OnRun() {
+void Worker::OnRun() 
+{
     assert(_epoll_fd >= 0);
     _logger->trace("OnRun");
 
@@ -76,31 +95,47 @@ void Worker::OnRun() {
     // for events to avoid thundering herd type behavior.
     int timeout = -1;
     std::array<struct epoll_event, 64> mod_list;
-    while (isRunning) {
+    while (isRunning)
+    {
         int nmod = epoll_wait(_epoll_fd, &mod_list[0], mod_list.size(), timeout);
         _logger->debug("Worker wokeup: {} events", nmod);
 
-        for (int i = 0; i < nmod; i++) {
+        for (int i = 0; i < nmod; i++)
+        {
             struct epoll_event &current_event = mod_list[i];
 
             // nullptr is used by server for event_fd "interface", if we got here then server
             // signals us to wakeup to process some state change, ignore it in INNER loop, react
             // on changes in OUTHER loop
-            if (current_event.data.ptr == nullptr) {
+            if (current_event.data.ptr == nullptr)
+            {
                 continue;
             }
 
             // Some connection gets new data
             Connection *pconn = static_cast<Connection *>(current_event.data.ptr);
-            if ((current_event.events & EPOLLERR) || (current_event.events & EPOLLHUP)) {
+            if ((current_event.events & EPOLLERR) || (current_event.events & EPOLLHUP))
+            {
                 _logger->debug("Got EPOLLERR or EPOLLHUP, value of returned events: {}", current_event.events);
                 pconn->OnError();
-            } else if (current_event.events & EPOLLRDHUP) {
+            }
+            else if (current_event.events & EPOLLRDHUP)
+            {
                 _logger->debug("Got EPOLLRDHUP, value of returned events: {}", current_event.events);
-                pconn->OnClose();
-            } else {
+                 if (current_event.events & EPOLLOUT) 
+                 {
+                    pconn->DoWrite();
+                 }
+                 else
+                 {
+                    pconn->OnClose();
+                }
+            } 
+            else
+            {
                 // Depends on what connection wants...
-                if (current_event.events & EPOLLIN) {
+                if (current_event.events & EPOLLIN) 
+                {
                     _logger->trace("Got EPOLLIN");
                     pconn->DoRead();
                 }
@@ -111,20 +146,37 @@ void Worker::OnRun() {
             }
 
             // Rearm connection
-            if (pconn->isAlive()) {
+            if (pconn->isAlive())
+            {
                 pconn->_event.events |= EPOLLONESHOT;
                 int epoll_ctl_retval;
-                if ((epoll_ctl_retval = epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, pconn->_socket, &pconn->_event))) {
+                if ((epoll_ctl_retval = epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, pconn->_socket, &pconn->_event)))
+                {
                     _logger->debug("epoll_ctl failed during connection rearm: error {}", epoll_ctl_retval);
                     pconn->OnError();
+                    
+                    std::lock_guard<std::mutex> l(_server->_connection_storage_blocking);
+                    close(pconn->_socket);
+                    auto position = std::find(_server->_connection_storage.begin(), _server->_connection_storage.end(), pconn);
+                    _server->_connection_storage.erase(position);
+                    
                     delete pconn;
+                    
                 }
             }
             // Or delete closed one
-            else {
-                if (epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, pconn->_socket, &pconn->_event)) {
+            else
+            {
+                if (epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, pconn->_socket, &pconn->_event))
+                {
                     std::cerr << "Failed to delete connection!" << std::endl;
                 }
+                
+                close(pconn->_socket);
+                std::lock_guard<std::mutex> l(_server->_connection_storage_blocking);
+                auto position = std::find(_server->_connection_storage.begin(), _server->_connection_storage.end(), pconn);
+                _server->_connection_storage.erase(position);
+                
                 delete pconn;
             }
         }
