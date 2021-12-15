@@ -77,6 +77,9 @@ private:
      * Call when all coroutines are blocked
      */
     unblocker_func _unblocker;
+    
+    void DeleteElement(context *&Head, context *&Element);
+    void AddingToTheHead(context *&Head, context *&New_Head);
 
 protected:
     /**

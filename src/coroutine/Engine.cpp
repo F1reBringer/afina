@@ -22,7 +22,37 @@ void Engine::SwitchCouroutine(Engine::context *ctx)
     Restore(*ctx);
 }
 
+void Engine::DeleteElement(context *&Head, context *&Element) {
+    if (Element == Head)
+    {
+        Head = Head->next;
+    }
+    if (Element->prev != nullptr)
+    {
+        Element->prev->next = Element->next;
+    }
+    if (Element->next != nullptr)
+    {
+        Element->next->prev = Element->prev;
+    }
+}
 
+void Engine::AddingToTheHead(context *&Head, context *&New_Head)
+{
+    if (Head == nullptr)
+    {
+        Head = New_Head;
+        Head->next = nullptr;
+    }
+    else
+    {
+        Head->prev = New_Head;
+        New_Head->next = Head;
+        Head = New_Head;
+    }
+
+    Head->prev = nullptr;
+}
 
 void Engine::Store(context &ctx)
 {
@@ -66,8 +96,6 @@ void Engine::Restore(context &ctx)
 }
 
 
-
-
 void Engine::yield()
 {
     if (!alive || (cur_routine == alive && !alive->next))
@@ -98,6 +126,43 @@ void Engine::sched(void *routine_)
     }
 
     SwitchCouroutine(next_routine);
+}
+
+
+void Engine::block(void *coro)
+{
+    context *coro_to_block = cur_routine;
+
+    if (coro)
+    {
+        coro_to_block = static_cast<context *>(coro);
+    }
+
+    if (!coro_to_block || coro_to_block->is_blocked)
+    {
+        return;
+    }
+    coro_to_block->is_blocked = true;
+
+    DeleteElement(alive, coro_to_block);
+    AddingToTheHead(blocked, coro_to_block);
+
+    if (coro_to_block == cur_routine) {
+        SwitchCouroutine(idle_ctx);
+    }
+}
+
+void Engine::unblock(void *coro)
+{
+    auto coro_to_unblock = static_cast<context *>(coro);
+    if (!coro_to_unblock || !coro_to_unblock->is_blocked)
+    {
+        return;
+    }
+    coro_to_unblock->is_blocked = false;
+
+    DeleteElement(blocked, coro_to_unblock);
+    AddingToTheHead(alive, coro_to_unblock);
 }
 
 Engine::~Engine()
