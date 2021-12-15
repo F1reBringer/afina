@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <iostream>
 
 namespace Afina {
 namespace Concurrency {
@@ -98,9 +99,10 @@ public:
 
         while (true)
         {
+            auto Begin = std::chrono::steady_clock::now();
             while (executor->tasks.empty() && executor->state == State::kRun) // When we have no tasks and Executor already running
             {
-            auto Begin = std::chrono::steady_clock::now();
+
                 if (executor->Empty_Condition.wait_until(_lock, Begin + std::chrono::milliseconds(executor->_idle_time))== std::cv_status::timeout // timeout idle_time
                 && executor->CountOfThreads > executor->_low_watermark) // NumOfThreads must be bigger than low_watermark
                 {
@@ -117,16 +119,16 @@ public:
                 _lock.unlock();
                 
                 
-            try
-            {
-            	task();
-            } 
-            catch(...)
-            {
-                throw std::runtime_error("Error, cannot do task\n");
-            }
-                _lock.lock();
-                executor->NumOfFreeThreads++; // this thread is free now
+            	try
+            	{
+            		task();
+            	} 
+            	catch(...)
+            	{
+                	std::cout << "Detected exception, Error!" << std::endl;
+            	}
+               _lock.lock();
+               executor->NumOfFreeThreads++; // this thread is free now
             }
             else if (executor->state == State::kStopping) //if we have no tasks and state=stopping
             {
