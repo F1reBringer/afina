@@ -128,7 +128,7 @@ void Connection::DoRead()
         if (_read_bytes == 0)
         {
             _logger->debug("Connection closed");
-            _data_available.store(true, std::memory_order_relaxed);
+            _is_eof = true;
         } 
         else if(errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK)
         {
@@ -204,7 +204,7 @@ void Connection::DoWrite()
     _output.erase(_output.begin(), _output.begin() + i);
     _write_bytes = written_bytes;
 
-    if (_output.empty())
+    if (_output.empty() & _is_eof) 
     {
         _event.events &= ~EPOLLOUT;
         _is_alive.store(false, std::memory_order_relaxed);

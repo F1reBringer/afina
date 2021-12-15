@@ -29,6 +29,7 @@ public:
         _is_alive.store(true, std::memory_order_release);
         _data_available.store(false, std::memory_order_release);
     }
+    
 
 
     inline bool isAlive() const { return _is_alive.load(std::memory_order_relaxed); }
@@ -50,6 +51,7 @@ private:
     
     std::atomic<bool> _is_alive;
     std::atomic<bool> _data_available;
+    bool _is_eof = false;
     
     std::shared_ptr<Afina::Storage> _pStorage;
     std::shared_ptr<spdlog::logger> _logger;
